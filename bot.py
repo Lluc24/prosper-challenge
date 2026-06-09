@@ -78,6 +78,9 @@ Guidelines:
 - Before booking, identify the patient: ask for their first name, last name, and date of birth \
   (format YYYY-MM-DD). Use find_patient first; if not found, offer to register them.
 - When showing available slots, present them in a friendly way (e.g. "Monday the 9th at 10 AM").
+- To cancel, first identify the patient with find_patient, then call get_patient_appointments to \
+  show them their scheduled appointments, then confirm which one to cancel before calling \
+  cancel_appointment with the appointment ID.
 - Always confirm the details with the patient before calling book_appointment or cancel_appointment.
 - Keep responses concise and conversational — this is a voice call.
 - Today's date and time is {datetime.now().strftime("%Y-%m-%d, %H:%M:%S")} (YYYY-MM-DD format).
@@ -192,6 +195,23 @@ async def book_appointment(
         await params.result_callback(data)
 
 
+async def get_patient_appointments(params: FunctionCallParams, patient_id: int):
+    """List all scheduled (non-cancelled) appointments for a patient.
+
+    Args:
+        patient_id: The patient's ID from find_patient or register_patient.
+    """
+    client = get_ehr_client()
+    resp = await client.get(f"/patients/{patient_id}/appointments")
+    if resp.status_code == 404:
+        logger.info(f"Patient {patient_id} not found when fetching appointments")
+        await params.result_callback({"error": "patient_not_found"})
+    else:
+        appointments = resp.json()
+        logger.info(f"Appointments for patient {patient_id}: {len(appointments)} scheduled")
+        await params.result_callback({"appointments": appointments})
+
+
 async def cancel_appointment(params: FunctionCallParams, appointment_id: int):
     """Cancel an existing appointment.
 
@@ -217,6 +237,7 @@ EHR_TOOLS = [
     register_patient,
     get_available_slots,
     book_appointment,
+    get_patient_appointments,
     cancel_appointment,
 ]
 

@@ -146,6 +146,24 @@ def create_appointment(payload: AppointmentCreate, db: Session = Depends(get_db)
     return appointment
 
 
+@app.get("/patients/{patient_id}/appointments", response_model=list[AppointmentResponse])
+def get_patient_appointments(patient_id: int, db: Session = Depends(get_db)):
+    patient = db.get(Patient, patient_id)
+    if not patient:
+        logger.warning(f"Appointments lookup failed: patient id={patient_id} not found")
+        raise HTTPException(status_code=404, detail="Patient not found")
+    appointments = (
+        db.query(Appointment)
+        .filter(Appointment.patient_id == patient_id, Appointment.status == "scheduled")
+        .order_by(Appointment.created_at)
+        .all()
+    )
+    logger.info(
+        f"Appointments queried: patient_id={patient_id} — {len(appointments)} scheduled"
+    )
+    return appointments
+
+
 @app.delete("/appointments/{appointment_id}", response_model=AppointmentResponse)
 def cancel_appointment(appointment_id: int, db: Session = Depends(get_db)):
     appointment = db.get(Appointment, appointment_id)
