@@ -36,3 +36,11 @@ htmlcov/
 # Misc
 *.log
 .cache/
+
+# EHR database
+*.db
+
+# Claude files
+claude/
+CLAUDE.md
+memory/
