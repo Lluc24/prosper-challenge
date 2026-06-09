@@ -55,8 +55,11 @@ Six async functions registered with the LLM via `register_direct_function`. Pipe
 | `book_appointment` | `POST /appointments` | Book a slot |
 | `get_patient_appointments` | `GET /patients/{id}/appointments` | Fetch a patient's scheduled appointments, needed so the agent can present them before cancelling rather than expecting the caller to know their appointment ID |
 | `cancel_appointment` | `DELETE /appointments/{id}` | Cancel by ID |
+| `end_conversation` | (no EHR call) | Terminate the pipeline gracefully once the conversation is done |
 
 The cancel flow specifically motivated `get_patient_appointments`: without it, `cancel_appointment` required an appointment ID the caller has no way of knowing. Now the agent identifies the patient, fetches their appointments, reads them back, confirms which one to cancel, then calls `cancel_appointment` with the right ID.
+
+`end_conversation` exists because without it the call just... hangs. The patient says goodbye, the LLM responds, and the pipeline sits there waiting for more audio. The fix is to give the LLM an explicit exit: when it detects the conversation is done, it calls `end_conversation`, which pushes a goodbye `TTSSpeakFrame` followed by an `EndTaskFrame` upstream. Pipecat converts that into an `EndFrame` at the pipeline source, which drains downstream through every processor for a clean shutdown.
 
 All tools share a single lazy-initialised `httpx.AsyncClient`. Errors (404, 409) come back as structured dicts rather than exceptions so the LLM can respond naturally ("that slot is already taken, want to pick another?") rather than crashing the turn.
 

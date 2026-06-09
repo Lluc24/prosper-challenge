@@ -38,7 +38,8 @@ from pipecat.audio.vad.silero import SileroVADAnalyzer
 logger.info("✅ Silero VAD model loaded")
 
 from pipecat.audio.vad.vad_analyzer import VADParams
-from pipecat.frames.frames import LLMRunFrame
+from pipecat.frames.frames import EndTaskFrame, LLMRunFrame, TTSSpeakFrame
+from pipecat.processors.frame_processor import FrameDirection
 
 logger.info("Loading pipeline components...")
 from pipecat.adapters.schemas.tools_schema import ToolsSchema
@@ -71,19 +72,23 @@ EHR_URL = os.environ.get("EHR_URL", "http://localhost:8000")
 
 SYSTEM_PROMPT = f"""\
 You are a scheduling assistant for Prosper Health clinic. Your job is to help patients look up, \
-book, and cancel appointments over the phone.
+book, and cancel appointments over the phone. Today's date and time is \
+{datetime.now().strftime("%Y-%m-%d, %H:%M:%S")} (YYYY-MM-DD format)
 
 Guidelines:
 - Always greet the patient warmly and introduce yourself as the Prosper Health scheduling assistant.
-- Before booking, identify the patient: ask for their first name, last name, and date of birth \
-  (format YYYY-MM-DD). Use find_patient first; if not found, offer to register them.
-- When showing available slots, present them in a friendly way (e.g. "Monday the 9th at 10 AM").
+- Before booking, identify the patient: ask for their first name, last name, and date of birth. \
+  Before using identify_patient, spell the name letter by letter and repeat DOB to make sure \
+  they are correct. If the patient is not found, offer to register them.
+- When showing available slots, present them in a friendly way (e.g. "Monday the 9th at 10 AM"). Make \
+  sure to present only available slots at least 30 minutes post current time.
 - To cancel, first identify the patient with find_patient, then call get_patient_appointments to \
   show them their scheduled appointments, then confirm which one to cancel before calling \
   cancel_appointment with the appointment ID.
 - Always confirm the details with the patient before calling book_appointment or cancel_appointment.
 - Keep responses concise and conversational — this is a voice call.
-- Today's date and time is {datetime.now().strftime("%Y-%m-%d, %H:%M:%S")} (YYYY-MM-DD format).
+- When the conversation has naturally concluded (task done, patient says goodbye), call \
+  end_conversation so the call terminates cleanly.
 """
 
 _ehr_client: httpx.AsyncClient | None = None
@@ -232,6 +237,14 @@ async def cancel_appointment(params: FunctionCallParams, appointment_id: int):
         await params.result_callback(data)
 
 
+async def end_conversation(params: FunctionCallParams):
+    """End the conversation gracefully once the patient's request has been handled and they have said goodbye."""
+    await params.result_callback({})
+    await params.llm.push_frame(TTSSpeakFrame("Thank you for calling Prosper Health. Have a great day!"))
+    await params.llm.push_frame(EndTaskFrame(), FrameDirection.UPSTREAM)
+    logger.info("Conversation ended by LLM tool call")
+
+
 EHR_TOOLS = [
     find_patient,
     register_patient,
@@ -239,6 +252,7 @@ EHR_TOOLS = [
     book_appointment,
     get_patient_appointments,
     cancel_appointment,
+    end_conversation,
 ]
 
 
