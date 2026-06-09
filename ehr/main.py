@@ -35,6 +35,7 @@ app = FastAPI(title="Prosper Health EHR", lifespan=lifespan)
 
 # --- Patients ---
 
+
 @app.post("/patients", response_model=PatientResponse, status_code=201)
 def create_patient(payload: PatientCreate, db: Session = Depends(get_db)):
     existing = (
@@ -55,7 +56,9 @@ def create_patient(payload: PatientCreate, db: Session = Depends(get_db)):
     db.add(patient)
     db.commit()
     db.refresh(patient)
-    logger.info(f"Patient registered: id={patient.id} name='{patient.first_name} {patient.last_name}' dob={patient.date_of_birth}")
+    logger.info(
+        f"Patient registered: id={patient.id} name='{patient.first_name} {patient.last_name}' dob={patient.date_of_birth}"
+    )
     return patient
 
 
@@ -84,15 +87,14 @@ def find_patient(
 
 # --- Slots ---
 
+
 @app.get("/slots", response_model=list[SlotResponse])
 def list_slots(start_date: date, end_date: date | None = None, db: Session = Depends(get_db)):
     start_dt = datetime.combine(start_date, datetime.min.time())
     end_dt = datetime.combine(end_date or start_date, datetime.max.time())
 
     booked_slot_ids = (
-        db.query(Appointment.slot_id)
-        .filter(Appointment.status == "scheduled")
-        .scalar_subquery()
+        db.query(Appointment.slot_id).filter(Appointment.status == "scheduled").scalar_subquery()
     )
 
     slots = (
@@ -110,6 +112,7 @@ def list_slots(start_date: date, end_date: date | None = None, db: Session = Dep
 
 
 # --- Appointments ---
+
 
 @app.post("/appointments", response_model=AppointmentResponse, status_code=201)
 def create_appointment(payload: AppointmentCreate, db: Session = Depends(get_db)):

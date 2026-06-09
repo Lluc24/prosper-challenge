@@ -31,9 +31,7 @@ class AppointmentSlot(Base):
     starts_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, unique=True, index=True)
     duration_minutes: Mapped[int] = mapped_column(Integer, default=30)
 
-    appointment: Mapped["Appointment | None"] = relationship(
-        back_populates="slot", uselist=False
-    )
+    appointment: Mapped["Appointment | None"] = relationship(back_populates="slot", uselist=False)
 
 
 class Appointment(Base):
@@ -41,7 +39,9 @@ class Appointment(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"), nullable=False)
-    slot_id: Mapped[int] = mapped_column(ForeignKey("appointment_slots.id"), nullable=False, unique=True)
+    slot_id: Mapped[int] = mapped_column(
+        ForeignKey("appointment_slots.id"), nullable=False, unique=True
+    )
     status: Mapped[str] = mapped_column(String, default="scheduled")
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

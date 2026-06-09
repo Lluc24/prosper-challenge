@@ -34,5 +34,7 @@ def seed_slots(db: Session, today: date | None = None) -> int:
 
     db.add_all(slots)
     db.commit()
-    logger.info(f"Seeded {len(slots)} slots from {today} to {today + timedelta(days=SEED_DAYS_AHEAD)}")
+    logger.info(
+        f"Seeded {len(slots)} slots from {today} to {today + timedelta(days=SEED_DAYS_AHEAD)}"
+    )
     return len(slots)
