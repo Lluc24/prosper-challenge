@@ -40,6 +40,10 @@ htmlcov/
 # EHR database
 *.db
 
+# Recordings and transcripts
+recordings/
+transcripts/
+
 # Claude files
 claude/
 CLAUDE.md

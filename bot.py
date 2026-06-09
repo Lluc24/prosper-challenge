@@ -18,7 +18,9 @@ Run the bot using::
     uv run bot.py
 """
 
+import json
 import os
+import wave
 
 import httpx
 from dotenv import load_dotenv
@@ -51,6 +53,7 @@ from pipecat.processors.aggregators.llm_response_universal import (
     LLMContextAggregatorPair,
     LLMUserAggregatorParams,
 )
+from pipecat.processors.audio.audio_buffer_processor import AudioBufferProcessor
 from pipecat.processors.frameworks.rtvi import RTVIObserver, RTVIProcessor
 from pipecat.runner.types import RunnerArguments
 from pipecat.runner.utils import create_transport
@@ -289,6 +292,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     )
 
     rtvi = RTVIProcessor()
+    audiobuffer = AudioBufferProcessor(num_channels=2)
 
     pipeline = Pipeline(
         [
@@ -299,6 +303,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
             llm,  # LLM
             tts,  # TTS
             transport.output(),  # Transport bot output
+            audiobuffer,  # Audio recording (after output so both tracks are captured)
             assistant_aggregator,  # Assistant spoken responses
         ]
     )
@@ -312,9 +317,31 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
         observers=[RTVIObserver(rtvi)],
     )
 
+    session_ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    os.makedirs("recordings", exist_ok=True)
+    os.makedirs("transcripts", exist_ok=True)
+
+    @audiobuffer.event_handler("on_audio_data")
+    async def on_audio_data(buffer, audio, sample_rate, num_channels):
+        path = f"recordings/conversation_{session_ts}.wav"
+        with wave.open(path, "wb") as wf:
+            wf.setnchannels(num_channels)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(audio)
+        logger.info(f"Audio saved: {path} ({len(audio)} bytes, {sample_rate}Hz, {num_channels}ch)")
+
+    async def save_transcript():
+        path = f"transcripts/conversation_{session_ts}.json"
+        with open(path, "w") as f:
+            json.dump(context.messages, f, indent=2, default=str)
+        logger.info(f"Transcript saved: {path} ({len(context.messages)} messages)")
+
     @transport.event_handler("on_client_connected")
     async def on_client_connected(transport, client):
         logger.info(f"Client connected")
+        await audiobuffer.start_recording()
         # Kick off the conversation.
         messages.append(
             {
@@ -332,6 +359,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     runner = PipelineRunner(handle_sigint=runner_args.handle_sigint)
 
     await runner.run(task)
+    await save_transcript()
 
 
 async def bot(runner_args: RunnerArguments):

@@ -35,8 +35,6 @@ Slots are pre-seeded at startup (Mon-Fri, 9 AM-5 PM, 30-min blocks, next 30 days
 
 **Exact-match patient lookup.** Requiring exact `first_name`, `last_name`, `date_of_birth` is fragile in a voice context. STT will produce "Jon" for "John", "Smyth" for "Smith". The right fix is fuzzy matching (phonetic similarity or edit distance) in the lookup, or a normalisation step in the agent before the query.
 
----
-
 ## Voice Agent
 
 ### Why Pipecat
@@ -59,11 +57,17 @@ Six async functions registered with the LLM via `register_direct_function`. Pipe
 
 The cancel flow specifically motivated `get_patient_appointments`: without it, `cancel_appointment` required an appointment ID the caller has no way of knowing. Now the agent identifies the patient, fetches their appointments, reads them back, confirms which one to cancel, then calls `cancel_appointment` with the right ID.
 
-`end_conversation` exists because without it the call just... hangs. The patient says goodbye, the LLM responds, and the pipeline sits there waiting for more audio. The fix is to give the LLM an explicit exit: when it detects the conversation is done, it calls `end_conversation`, which pushes a goodbye `TTSSpeakFrame` followed by an `EndTaskFrame` upstream. Pipecat converts that into an `EndFrame` at the pipeline source, which drains downstream through every processor for a clean shutdown.
+Without `end_conversation`, the call hangs after the patient says goodbye: the pipeline stays open waiting for more audio. The tool gives the LLM an explicit exit, pushing a farewell phrase and then an `EndTaskFrame` to drain and close the pipeline cleanly.
 
 All tools share a single lazy-initialised `httpx.AsyncClient`. Errors (404, 409) come back as structured dicts rather than exceptions so the LLM can respond naturally ("that slot is already taken, want to pick another?") rather than crashing the turn.
 
----
+## Recording and transcription
+
+Each session writes two files, both gitignored and keyed by a timestamp set at connect time.
+
+For audio, I went with stereo (user left, bot right) rather than a mono mix so speaker tracks stay separable for any downstream analysis. The `AudioBufferProcessor` sits after `transport.output()` in the pipeline so it captures both directions, and recording starts explicitly on connect.
+
+For the transcript, I just serialise `context.messages` on disconnect. It's the full OpenAI message list including tool calls and results, so you get complete observability into what the agent did without any custom accumulation logic.
 
 ## Cost analysis
 
