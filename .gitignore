@@ -36,3 +36,18 @@ htmlcov/
 # Misc
 *.log
 .cache/
+
+# EHR database
+*.db
+
+# Recordings and transcripts
+recordings/
+transcripts/
+
+# Eval report
+eval/report.json
+
+# Claude files
+claude/
+CLAUDE.md
+memory/
