@@ -31,7 +31,7 @@ Slots are pre-seeded at startup (Mon-Fri, 9 AM-5 PM, 30-min blocks, next 30 days
 
 ### Things I'd fix in production
 
-**Race condition on double-booking.** The SELECT-then-INSERT has a TOCTOU window: two concurrent requests for the same slot can both pass the conflict check before either commits. The `slot_id` unique constraint means the second commit will at least fail with an integrity error rather than corrupt data, but the user gets a 500 instead of a clean 409. Fix with `SELECT FOR UPDATE` or a unique partial index on `(slot_id) WHERE status='scheduled'` plus a retry.
+**Race condition on double-booking.** The SELECT-then-INSERT has a TOCTOU window: two concurrent requests for the same slot can both pass the conflict check before either commits. The `slot_id` unique constraint means the second commit will at least fail with an integrity error rather than corrupt data, but the user gets a 500 instead of a clean 409. The correct fix for SQLite is to remove the manual conflict check entirely, attempt the INSERT unconditionally, and catch `IntegrityError` at the ORM level to return a clean 409. The constraint is already in place; the missing piece is the exception handler. On Postgres you would instead use `INSERT ... ON CONFLICT DO NOTHING` or `SELECT FOR UPDATE` to make the intent explicit, but for SQLite the catch-and-convert pattern is both correct and idiomatic.
 
 **Exact-match patient lookup.** Requiring exact `first_name`, `last_name`, `date_of_birth` is fragile in a voice context. STT will produce "Jon" for "John", "Smyth" for "Smith". The right fix is fuzzy matching (phonetic similarity or edit distance) in the lookup, or a normalisation step in the agent before the query.
 
