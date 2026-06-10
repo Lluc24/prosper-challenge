@@ -69,6 +69,28 @@ For audio, I went with stereo (user left, bot right) rather than a mono mix so s
 
 For the transcript, I just serialise `context.messages` on disconnect. It's the full OpenAI message list including tool calls and results, so you get complete observability into what the agent did without any custom accumulation logic.
 
+## Testing
+
+### Evaluation harness
+
+This is a prototype that addresses evaluating whether the agent behaves correctly. The harness (`eval/`) runs a full scheduling conversation without any audio, Pipecat pipeline, or browser. Two OpenAI LLM calls alternate turns in a plain Python loop: the agent LLM receives the same system prompt and tool schemas as `bot.py` and calls the live EHR over HTTP, while the patient LLM receives a persona prompt and simulates a caller. The loop runs until the agent calls `end_conversation` or a turn limit is reached. Afterwards, a third LLM judge scores the full transcript against a rubric, and SQLAlchemy assertions verify the final DB state. Results are appended to `eval/report.json`.
+
+```bash
+# Prerequisites: EHR must be running
+uv run uvicorn ehr.main:app --port 8000 --reload
+
+# Run all scenarios
+uv run -m eval
+```
+
+The first scenario is `book_new_patient`: the fixture deletes any pre-existing patient named Maria Garcia (DOB 1985-03-15), the patient LLM plays a first-time caller who wants a morning slot next week, and the DB assertions confirm that a patient row and a scheduled appointment row were created.
+
+### Tradeoffs vs. testing bot.py directly
+
+The alternative would be to connect a real audio client to the live Pipecat pipeline and test the full voice path. The two main tradeoffs against that approach are implementation complexity and harder-to-diagnose failures. Building a proper audio test client requires handling WebSocket lifecycle, audio format negotiation, STT synchronisation on both sides, and VAD timing, which is substantial work in itself. And once it is running, failures become harder to attribute: a booking flow can break because of a transcription error on a patient name rather than any fault in the LLM's logic, which makes it difficult to tell whether the agent is actually misbehaving. For validating that the agent collects the right information, confirms before acting, and handles EHR errors gracefully, text-only simulation is more reliable and much faster to iterate on.
+
+That said, I am aware the full-pipeline approach is achievable and could be the right investment at a later stage; I even found a working example of it in the [pipecat-examples Twilio inbound chatbot](https://github.com/pipecat-ai/pipecat-examples/tree/main/twilio-chatbot/inbound), but it was outside the scope of this challenge.
+
 ## Cost analysis
 
 The main per-call costs are ElevenLabs (STT + TTS) and OpenAI (LLM). SQLite and the FastAPI server are negligible.
@@ -80,3 +102,24 @@ The main per-call costs are ElevenLabs (STT + TTS) and OpenAI (LLM). SQLite and 
 | OpenAI LLM | gpt-4o-mini | ~$0.001 / scheduling turn |
 
 A typical scheduling call (2-4 min, 5-10 LLM turns) runs under **$0.02**. The dominant cost driver at scale would be TTS audio, since longer agent responses add up faster than LLM tokens.
+
+## Latency
+Because the pipeline follows a sequential flow (audio in → STT → LLM (+ function calls) → TTS → audio out), latency adds up across stages. The main levers to reduce it and their tradeoffs are:
+
+**Turn detection** is the most impactful and least obvious lever. The current config uses `LocalSmartTurnAnalyzerV3` with Silero VAD at `stop_secs=0.2`, aggressive by design, but in a healthcare context cutting in too early means acting on incomplete information ("I want to cancel my appointment on... Tuesday"). Increasing to 0.5–0.8s improves accuracy at the cost of feeling slightly unresponsive. The right value should be tuned against real call recordings.
+
+**Model choice.** GPT-4.1 sits in the practical sweet spot: fast enough for real-time conversation, capable enough for multi-step tool flows. A reasoning model would handle ambiguous cases more reliably but adds seconds of latency mid-call. A smaller model would be faster but more prone to mis-sequencing tool calls (e.g. booking without confirming first).
+
+**Streaming TTS.** Pipecat pipes LLM tokens directly to ElevenLabs as they arrive, so the patient starts hearing the response before generation finishes. The tradeoff: if the LLM decides mid-stream to call a tool, it has to stop speaking mid-sentence. Prompt design can mitigate this by keeping tool calls away from the middle of a turn.
+
+**Tool call chaining.** Some flows require sequential EHR calls (find patient → list slots → book). Each adds ~50–200ms locally, but against a real EHR (Epic, Athena) that becomes 500ms–2s per call. Parallelising independent calls where possible would help, though most scheduling flows are inherently sequential.
+
+## Reliability
+
+A clinic phone line needs to be available even when individual external providers have outages. There are three layers where fallback makes sense.
+
+**AI service providers.** Each stage of the pipeline depends on an external provider: ElevenLabs for STT and TTS, OpenAI for the LLM. If any one of them becomes unavailable mid-call, the bot goes silent, which is worse than never picking up. Pipecat's service abstraction helps here because each provider implements the same frame interface, so a circuit breaker can swap in an alternative at runtime. For the LLM, the system prompt, tool definitions, and conversation history are all provider-agnostic, so switching to Anthropic mid-session just means re-instantiating the service with the current context. For STT and TTS, alternatives like Deepgram or Azure Cognitive Speech can be slotted in without changing the pipeline topology.
+
+**Telephony.** If the primary telephony provider (say Telnyx) has a regional outage, the PSTN number can be rerouted to a fallback (say Twilio) within seconds via a DNS or SIP redirect, and the Pipecat transport layer swaps accordingly. Both providers support SIP trunking and WebRTC, so the pipeline wiring does not change.
+
+**Human fallback.** Both of the above cover transient technical failures, but there are situations no automated fallback can handle: a confused patient, an edge case the LLM mishandles repeatedly, or a complete multi-provider outage. There should always be at least one human administrator available to take over a call. When the bot detects it is failing to make progress (for example, the same intent is not resolved after several turns, or an unhandled exception occurs) it should transfer the call to the on-call human rather than leaving the patient hanging.
