@@ -73,7 +73,8 @@ load_dotenv(override=True)
 
 EHR_URL = os.environ.get("EHR_URL", "http://localhost:8000")
 
-SYSTEM_PROMPT = f"""\
+def get_system_prompt() -> str:
+    return f"""\
 You are a scheduling assistant for Prosper Health clinic. Your job is to help patients look up, \
 book, and cancel appointments over the phone. Today's date and time is \
 {datetime.now().strftime("%Y-%m-%d, %H:%M:%S")} (YYYY-MM-DD format)
@@ -277,7 +278,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments):
     messages = [
         {
             "role": "system",
-            "content": SYSTEM_PROMPT,
+            "content": get_system_prompt(),
         },
     ]
 

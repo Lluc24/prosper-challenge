@@ -35,6 +35,8 @@ Slots are pre-seeded at startup (Mon-Fri, 9 AM-5 PM, 30-min blocks, next 30 days
 
 **Exact-match patient lookup.** Requiring exact `first_name`, `last_name`, `date_of_birth` is fragile in a voice context. STT will produce "Jon" for "John", "Smyth" for "Smith". The right fix is fuzzy matching (phonetic similarity or edit distance) in the lookup, or a normalisation step in the agent before the query.
 
+**HIPAA and PHI handling.** Patient names, dates of birth, and appointment records are Protected Health Information under HIPAA. In a real deployment this has implications at every layer: the database would need encryption at rest (AES-256) and the transport layer would need TLS everywhere, including the WebRTC stream and EHR API calls. Audit logging of every read and write to patient data would be mandatory. Call recordings and transcripts containing PHI would need to be stored in a HIPAA-eligible environment (AWS, Azure, or GCP each offer BAA-covered services), with retention and deletion policies that meet the minimum necessary standard. The LLM API calls themselves are a risk surface: sending raw PHI to a third-party provider requires a Business Associate Agreement with that provider. OpenAI and Anthropic both offer BAA-eligible enterprise tiers. Voice data is particularly sensitive because it can re-identify a patient even when stripped of obvious identifiers, so audio recordings would warrant stricter access controls and shorter retention than text transcripts.
+
 ## Voice Agent
 
 ### Why Pipecat
